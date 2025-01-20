@@ -13,7 +13,11 @@ from pydantic import Field
 from fpdf import FPDF
 import base64
 from datetime import datetime
-
+import os
+from dotenv import load_dotenv
+load_dotenv()
+# Define tools and data processor (unchanged)
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 class RiskAnalyzerTool(BaseTool):
     name: str = "risk_analyzer"
     description: str = "Analyzes security risks based on survey responses"
@@ -75,7 +79,7 @@ class DataProcessor:
             risk_data = self.risk_matrix[self.risk_matrix['Risk Type'].str.strip() == risk_type.strip()]
             
             if risk_data.empty:
-                st.warning(f"Risk type '{risk_type}' not found in the risk matrix")
+                # Skip warning and return empty mitigations
                 return {
                     'mitigations': {
                         'tech': [], 'human': [], 'tss': [], 
@@ -121,7 +125,7 @@ class DataProcessor:
                 },
                 'solution_details': {}
             }
-
+        
     def get_solution_details(self, solution_name: str) -> Dict[str, Any]:
         try:
             solution_data = self.assurance_matrix[
@@ -149,11 +153,12 @@ class DataProcessor:
             st.error(f"Error getting solution details: {str(e)}")
             return None
 
+# RiskAssessmentChat Class (previously missing)
 class RiskAssessmentChat:
     def __init__(self):
         self.data_processor = DataProcessor()
         self.llm = ChatMistralAI(
-            mistral_api_key="fKvEx9jkjolPiDfSY2h6HF3RcZGyX6hi",
+            mistral_api_key=MISTRAL_API_KEY,
             model="mistral-large")  # or "mistral-small" or "mistral-medium" based on your needs
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         self.current_question_idx = 0
@@ -269,6 +274,7 @@ class RiskAssessmentChat:
         
         return pdf_generator.get_download_link(report_type)
 
+# StoreInformation Class
 class StoreInformation:
     def __init__(self):
         self.store_fields = [
@@ -302,39 +308,45 @@ class StoreInformation:
 
     def is_complete(self):
         return self.current_field_idx >= len(self.store_fields)
-    
+
 class PDFReport:
     def __init__(self):
-        self.pdf = FPDF()
+        self.pdf = FPDF(orientation='P', unit='mm', format='A4')
         self.pdf.add_page()
-        self.pdf.set_font("Arial", size=12)
-        self.pdf.add_font('DejaVu', '', 'DejaVuSansCondensed.ttf', uni=True)
-        self.pdf.set_font('DejaVu', '', 12)
+        self.pdf.set_font("Arial", size=10)  # Reduced font size
+        self.pdf.set_left_margin(10)
+        self.pdf.set_right_margin(10)
+        self.pdf.set_auto_page_break(auto=True, margin=10)  # Reduced margin
     
     def add_title(self, title):
-        self.pdf.set_font('DejaVu', '', 16)
-        self.pdf.cell(200, 10, txt=title, ln=True, align='C')
-        self.pdf.set_font('DejaVu', '', 12)
+        self.pdf.set_font('Arial', 'B', 16)  # Bold and larger title
+        self.pdf.set_text_color(0, 0, 128)  # Blue color for title
+        self.pdf.cell(190, 8, txt=title, ln=True, align='C')  # Reduced height
+        self.pdf.ln(5)  # Reduced spacing
     
     def add_section(self, title):
-        self.pdf.set_font('DejaVu', '', 14)
-        self.pdf.cell(200, 10, txt=title, ln=True)
-        self.pdf.set_font('DejaVu', '', 12)
+        self.pdf.set_font('Arial', 'B', 12)  # Bold section title
+        self.pdf.set_text_color(0, 0, 0)  # Black color for section title
+        self.pdf.cell(190, 8, txt=title, ln=True)  # Reduced height
+        self.pdf.ln(2)  # Minimal spacing
     
     def add_content(self, content):
-        self.pdf.multi_cell(0, 10, txt=content)
+        self.pdf.set_font('Arial', '', 10)  # Normal font for content
+        self.pdf.set_text_color(0, 0, 0)  # Black color for content
+        self.pdf.multi_cell(190, 6, txt=content)  # Reduced line height
+        self.pdf.ln(2)  # Minimal spacing
     
     def add_store_info(self, store_data):
         self.add_section("Store Information")
         for field, value in store_data.items():
-            self.pdf.multi_cell(0, 10, txt=f"{field}: {str(value)}")
+            self.add_content(f"{field}: {value}")
     
     def add_survey_responses(self, answers):
         self.add_section("Survey Responses")
         for question, answer in answers.items():
-            self.pdf.multi_cell(0, 10, txt=f"Question: {question}")
-            self.pdf.multi_cell(0, 10, txt=f"Answer: {answer}")
-            self.pdf.ln(5)
+            self.add_content(f"Q: {question}")
+            self.add_content(f"A: {answer}")
+            self.pdf.ln(1)  # Minimal spacing
     
     def add_quick_report(self, report, store_data, answers):
         self.add_store_info(store_data)
@@ -344,36 +356,83 @@ class PDFReport:
         self.add_content(report['risk_summary'])
         
         self.add_section("Identified Risks")
-        for risk in report['identified_risks']:
-            self.pdf.multi_cell(0, 10, txt=f"- {risk}")
-            
+        risks_text = ", ".join(report['identified_risks'])  # Convert list to sentence
+        self.add_content(risks_text)
+        
         self.add_section("Available Solutions")
-        solutions_text = ", ".join(report['unique_solutions'])
-        self.pdf.multi_cell(0, 10, txt=solutions_text)
+        solutions_text = ", ".join(report['unique_solutions'])  # Convert list to sentence
+        self.add_content(solutions_text)
     
     def add_detailed_report(self, report, store_data, answers):
         self.add_store_info(store_data)
         self.add_survey_responses(answers)
         
         for risk_data in report['identified_risks']:
-            risk_type = risk_data['risk_type']
+            self.add_section(f"Risk: {risk_data['risk_type']}")
+            
             mitigations = risk_data['mitigations']['mitigations']
             solution_details = risk_data['mitigations']['solution_details']
             
-            self.add_section(f"Risk: {risk_type}")
-            
+            # Add Mitigations
+            self.add_section("Mitigation Steps")
             for category, items in mitigations.items():
                 if items:
-                    self.pdf.set_font('DejaVu', '', 12)
-                    self.pdf.multi_cell(0, 10, txt=f"{category.title()} Solutions:")
-                    solutions_text = ", ".join(items)
-                    self.pdf.multi_cell(0, 10, txt=solutions_text)
-
+                    category_text = f"{category.title()}: {', '.join(items)}"  # Convert list to sentence
+                    self.add_content(category_text)
+            
+            # Add Implementation Details
+            self.add_section("Implementation Details")
+            for solution_name, details in solution_details.items():
+                if details:
+                    self.add_content(f"**Solution: {solution_name}**")
+                    if details['use_case']:
+                        self.add_content(f"Use Case: {details['use_case']}")
+                    if details['links']:
+                        self.add_content(f"Reference Links: {details['links']}")
+                    if details['partners']:
+                        self.add_content(f"Partners: {details['partners']}")
+                    if details['data_format']:
+                        self.add_content(f"Data Format: {details['data_format']}")
+                    if details['immediate_actions']:
+                        self.add_content(f"Immediate Actions: {', '.join(details['immediate_actions'])}")
+                    if details['data_collation']:
+                        self.add_content(f"Data Collation: {', '.join(details['data_collation'])}")
+                    if details['dashboard']:
+                        self.add_content(f"Dashboard Features: {', '.join(details['dashboard'])}")
+                    if details['wearable']:
+                        self.add_content(f"Wearable Features: {', '.join(details['wearable'])}")
+                    if details['mobile']:
+                        self.add_content(f"Mobile Features: {', '.join(details['mobile'])}")
+                    if details['soc']:
+                        self.add_content(f"SOC Features: {', '.join(details['soc'])}")
+                    if details['audio_visual']:
+                        self.add_content(f"Audio/Visual Features: {', '.join(details['audio_visual'])}")
+                    self.pdf.ln(2)  # Minimal spacing
+    
+    def get_download_link(self, report_type):
+        try:
+            temp_file = f"security_assessment_{report_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            self.pdf.output(temp_file)
+            
+            with open(temp_file, "rb") as f:
+                pdf_data = f.read()
+            base64_pdf = base64.b64encode(pdf_data).decode('utf-8')
+            
+            href = f'<a href="data:application/pdf;base64,{base64_pdf}" download="{temp_file}">Download {report_type.title()} Report</a>'
+            
+            import os
+            os.remove(temp_file)
+            
+            return href
+        except Exception as e:
+            st.error(f"Error generating download link: {str(e)}")
+            return "Error generating PDF download link"
+        
+# Main Application
 def main():
     st.set_page_config(page_title="Security Risk Assessment", layout="wide")
     st.title("Security Risk Assessment System")
     
-    # Initialize session state
     if 'chat' not in st.session_state:
         st.session_state.chat = RiskAssessmentChat()
     

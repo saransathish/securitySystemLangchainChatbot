@@ -399,7 +399,12 @@ class PDFReport:
     def add_survey_responses(self, answers):
         self.add_section("Survey Responses")
         for question, answer in answers.items():
-            self.pdf.multi_cell(0, 10, txt=f"Q: {question}\nA: {answer}")
+            # Split long questions into multiple lines
+            lines = [question[i:i+90] for i in range(0, len(question), 90)]
+            for line in lines:
+                self.pdf.cell(0, 10, txt=line, ln=True)
+            self.pdf.cell(0, 10, txt=f"Answer: {answer}", ln=True)
+            self.pdf.cell(0, 10, txt="", ln=True)    
     
     def add_risks_and_mitigations(self, report):
         self.add_section("Identified Risks and Mitigations")
