@@ -69,14 +69,33 @@ class DataProcessor:
 
     def get_mitigation_steps(self, risk_type: str) -> Dict[str, Any]:
         try:
-            risk_data = self.risk_matrix[self.risk_matrix['Risk Type'] == risk_type].iloc[0]
+            # First check if the risk type exists
+            risk_data = self.risk_matrix[self.risk_matrix['Risk Type'].str.strip() == risk_type.strip()]
+            
+            if risk_data.empty:
+                st.warning(f"Risk type '{risk_type}' not found in the risk matrix")
+                return {
+                    'mitigations': {
+                        'tech': [], 'human': [], 'tss': [], 
+                        'analytics': [], 'policy': []
+                    },
+                    'solution_details': {}
+                }
+            
+            # Get the first matching row
+            risk_row = risk_data.iloc[0]
+            
             mitigations = {
-                'tech': [x.strip() for x in risk_data['Tech Mitigation'].split(',')] if pd.notna(risk_data['Tech Mitigation']) else [],
-                'human': [x.strip() for x in risk_data['Human Mitigation'].split(',')] if pd.notna(risk_data['Human Mitigation']) else [],
-                'tss': [x.strip() for x in risk_data['TSS Mitigation'].split(',')] if pd.notna(risk_data['TSS Mitigation']) else [],
-                'analytics': [x.strip() for x in risk_data['Analytics Mitigation'].split(',')] if pd.notna(risk_data['Analytics Mitigation']) else [],
-                'policy': [x.strip() for x in risk_data['Policy Mitigation'].split(',')] if pd.notna(risk_data['Policy Mitigation']) else []
+                'tech': [x.strip() for x in str(risk_row['Tech Mitigation']).split(',')] if pd.notna(risk_row['Tech Mitigation']) else [],
+                'human': [x.strip() for x in str(risk_row['Human Mitigation']).split(',')] if pd.notna(risk_row['Human Mitigation']) else [],
+                'tss': [x.strip() for x in str(risk_row['TSS Mitigation']).split(',')] if pd.notna(risk_row['TSS Mitigation']) else [],
+                'analytics': [x.strip() for x in str(risk_row['Analytics Mitigation']).split(',')] if pd.notna(risk_row['Analytics Mitigation']) else [],
+                'policy': [x.strip() for x in str(risk_row['Policy Mitigation']).split(',')] if pd.notna(risk_row['Policy Mitigation']) else []
             }
+            
+            # Clean empty strings from lists
+            for key in mitigations:
+                mitigations[key] = [item for item in mitigations[key] if item and item != 'nan']
             
             # Get solution details for each mitigation
             solution_details = {}
@@ -93,6 +112,7 @@ class DataProcessor:
                 'mitigations': mitigations,
                 'solution_details': solution_details
             }
+            
         except Exception as e:
             st.error(f"Error getting mitigation steps: {str(e)}")
             return {

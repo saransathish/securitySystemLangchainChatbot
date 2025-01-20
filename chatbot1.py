@@ -10,7 +10,6 @@ from langchain.prompts import PromptTemplate
 from typing import Dict, List, Any, Optional
 import json
 from pydantic import Field
-
 class RiskAnalyzerTool(BaseTool):
     name: str = "risk_analyzer"
     description: str = "Analyzes security risks based on survey responses"
@@ -106,7 +105,6 @@ class DataProcessor:
                 'soc': []
             }
 
-# [Previous imports and tool classes remain the same...]
 
 class RiskAssessmentChat:
     def __init__(self):
@@ -117,6 +115,7 @@ class RiskAssessmentChat:
         self.answers = {}
         self.setup_tools()
         self.setup_agent()
+        
 
     def setup_tools(self):
         risk_analyzer = RiskAnalyzerTool(data_processor=self.data_processor)

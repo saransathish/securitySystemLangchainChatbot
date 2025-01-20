@@ -10,6 +10,9 @@ from langchain.prompts import PromptTemplate
 from typing import Dict, List, Any, Optional
 import json
 from pydantic import Field
+from fpdf import FPDF
+import base64
+from datetime import datetime
 
 class RiskAnalyzerTool(BaseTool):
     name: str = "risk_analyzer"
@@ -157,9 +160,10 @@ class RiskAssessmentChat:
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         self.current_question_idx = 0
         self.answers = {}
+        self.store_info = StoreInformation()
         self.setup_tools()
         self.setup_agent()
-
+        self.state = "store_info"
     def setup_tools(self):
         self.risk_analyzer = RiskAnalyzerTool(data_processor=self.data_processor)
         self.mitigation_tool = MitigationTool(data_processor=self.data_processor)
@@ -224,10 +228,205 @@ class RiskAssessmentChat:
             report['identified_risks'].append(risk_data)
 
         return report
+    
+    def generate_pdf_report(self) -> str:
+        report = self.generate_report()
+        pdf_generator = PDFReport()
+        
+        # Add report title and date
+        pdf_generator.add_title("Security Risk Assessment Report")
+        pdf_generator.add_content(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Add store information
+        pdf_generator.add_store_info(self.store_info.store_data)
+        
+        # Add survey responses
+        pdf_generator.add_survey_responses(self.answers)
+        
+        # Add risks and mitigations
+        pdf_generator.add_risks_and_mitigations(report)
+        
+        return pdf_generator.get_download_link()
+    
+class StoreInformation:
+    def __init__(self):
+        self.store_fields = [
+            {
+                "field": "Store Name",
+                "question": "What is your store name?",
+                "type": "text"
+            },
+            {
+                "field": "Store Identifier",
+                "question": "What is your store identifier?",
+                "type": "text"
+            },
+            {
+                "field": "Address",
+                "question": "What is the store address?",
+                "type": "text"
+            },
+            {
+                "field": "Postcode",
+                "question": "What is the store postcode?",
+                "type": "text"
+            },
+            {
+                "field": "Store Format",
+                "question": "What format is the store?",
+                "type": "select",
+                "options": ["Superstore", "Convenience store", "Department store"]
+            },
+            {
+                "field": "Location Footprint",
+                "question": "What is the store's location footprint?",
+                "type": "select",
+                "options": ["Retail park", "Shopping centre", "High street"]
+            },
+            {
+                "field": "Selling Area Percentage",
+                "question": "What percentage of the store size is selling area?",
+                "type": "select",
+                "options": ["<50%", "<75%", "<85%", "<95%"]
+            },
+            {
+                "field": "Service Checkout Counters",
+                "question": "How many serviced checkout counters are available?",
+                "type": "select",
+                "options": ["0", "1", "2", "3", "4", "5+"]
+            },
+            {
+                "field": "Self Service Checkouts",
+                "question": "Do you have self service checkouts?",
+                "type": "select",
+                "options": ["Yes", "No"]
+            },
+            {
+                "field": "High Risk Assets",
+                "question": "What high-risk or high-value assets are present? (Enter comma-separated values for multiple: BWS, Perfume, ATM)",
+                "type": "text"
+            },
+            {
+                "field": "ATM Present",
+                "question": "Do you have an ATM?",
+                "type": "select",
+                "options": ["No", "Yes"]
+            },
+            {
+                "field": "ATM Type",
+                "question": "What type of ATM do you have?",
+                "type": "select",
+                "options": ["None", "Freestanding", "TTW", "Both"]
+            },
+            {
+                "field": "Number of Entrances/Exits",
+                "question": "How many entrances and exits are there into the store?",
+                "type": "select",
+                "options": ["1", "2", "3", "4", "5+"]
+            },
+            {
+                "field": "High Value Items Near Entrance",
+                "question": "Do you have high value items positioned close to an entrance/exit?",
+                "type": "select",
+                "options": ["Yes", "No"]
+            },
+            {
+                "field": "Customer Toilet",
+                "question": "Do you have a customer toilet?",
+                "type": "select",
+                "options": ["Yes", "No"]
+            },
+            {
+                "field": "Fitting Rooms",
+                "question": "Do you have fitting rooms?",
+                "type": "select",
+                "options": ["Yes", "No"]
+            },
+            {
+                "field": "No Challenge Returns Policy",
+                "question": "Do you have a no challenge returns policy?",
+                "type": "select",
+                "options": ["Yes", "No"]
+            }
+        ]
+        self.store_data = {}
+        self.current_field_idx = 0
+
+    def get_next_question(self):
+        if self.current_field_idx < len(self.store_fields):
+            return self.store_fields[self.current_field_idx]
+        return None
+
+    def process_answer(self, answer):
+        current_field = self.store_fields[self.current_field_idx]
+        self.store_data[current_field["field"]] = answer
+        self.current_field_idx += 1
+
+    def is_complete(self):
+        return self.current_field_idx >= len(self.store_fields)
+
+    def validate_answer(self, answer, field_info):
+        if field_info["type"] == "select" and answer not in field_info["options"]:
+            return False
+        return True
+        
+class PDFReport:
+    def __init__(self):
+        self.pdf = FPDF()
+        self.pdf.add_page()
+        self.pdf.set_font("Arial", size=12)
+    
+    def add_title(self, title):
+        self.pdf.set_font("Arial", "B", 16)
+        self.pdf.cell(200, 10, txt=title, ln=True, align='C')
+        self.pdf.set_font("Arial", size=12)
+    
+    def add_section(self, title):
+        self.pdf.set_font("Arial", "B", 14)
+        self.pdf.cell(200, 10, txt=title, ln=True)
+        self.pdf.set_font("Arial", size=12)
+    
+    def add_content(self, content):
+        self.pdf.multi_cell(0, 10, txt=content)
+    
+    def add_store_info(self, store_data):
+        self.add_section("Store Information")
+        for field, value in store_data.items():
+            if isinstance(value, list):
+                value = ", ".join(value)
+            self.pdf.cell(0, 10, txt=f"{field}: {value}", ln=True)
+    
+    def add_survey_responses(self, answers):
+        self.add_section("Survey Responses")
+        for question, answer in answers.items():
+            self.pdf.multi_cell(0, 10, txt=f"Q: {question}\nA: {answer}")
+    
+    def add_risks_and_mitigations(self, report):
+        self.add_section("Identified Risks and Mitigations")
+        for risk_data in report['identified_risks']:
+            risk_type = risk_data['risk_type']
+            mitigations = risk_data['mitigations']['mitigations']
+            
+            self.pdf.set_font("Arial", "B", 12)
+            self.pdf.cell(0, 10, txt=f"Risk: {risk_type}", ln=True)
+            self.pdf.set_font("Arial", size=12)
+            
+            for category, items in mitigations.items():
+                if items:
+                    self.pdf.cell(0, 10, txt=f"{category.title()} Mitigations:", ln=True)
+                    for item in items:
+                        self.pdf.cell(0, 10, txt=f"- {item}", ln=True)
+    
+    def get_download_link(self):
+        self.pdf.output("report.pdf")
+        with open("report.pdf", "rb") as f:
+            bytes = f.read()
+            b64 = base64.b64encode(bytes).decode()
+            return f'<a href="data:application/pdf;base64,{b64}" download="security_assessment_report.pdf">Download PDF Report</a>'
 
 def main():
-    st.set_page_config(page_title="Security Risk Assessment", layout="wide")
-    st.title("Security Risk Assessment System")
+    st.set_page_config(page_title="Security Risk", layout="wide")
+    st.title("Security Risk Survey")
     
     # Initialize session state
     if 'chat' not in st.session_state:
@@ -238,44 +437,78 @@ def main():
     
     if 'report_generated' not in st.session_state:
         st.session_state.report_generated = False
+    
 
     # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Get next question or show report
-    question = st.session_state.chat.get_next_question()
+    if st.session_state.chat.state == "store_info":
+        field_info = st.session_state.chat.store_info.get_next_question()
+        
+        if field_info:
+            with st.chat_message("assistant"):
+                if field_info["type"] == "select":
+                    options_text = ", ".join(field_info["options"])
+                    message = f"{field_info['question']}\nOptions: {options_text}"
+                else:
+                    message = field_info['question']
+                st.markdown(message)
+                st.session_state.messages.append({"role": "assistant", "content": message})
 
-    if question:
-        with st.chat_message("assistant"):
-            st.markdown(f"**Question**: {question}")
-            st.session_state.messages.append({"role": "assistant", "content": question})
+            user_answer = st.chat_input("Your answer:")
+            
+            if user_answer:
+                if st.session_state.chat.store_info.validate_answer(user_answer, field_info):
+                    with st.chat_message("user"):
+                        st.markdown(user_answer)
+                        st.session_state.messages.append({"role": "user", "content": user_answer})
+                    
+                    st.session_state.chat.store_info.process_answer(user_answer)
+                    
+                    if st.session_state.chat.store_info.is_complete():
+                        st.session_state.chat.state = "survey"
+                    st.rerun()
+                else:
+                    st.error("Please provide a valid answer from the options given.")
+        
+    elif st.session_state.chat.state == "survey":
+        question = st.session_state.chat.get_next_question()
+        
+        if question:
+            with st.chat_message("assistant"):
+                st.markdown(f"**Survey Question**: {question}")
+                st.session_state.messages.append({"role": "assistant", "content": question})
 
-        user_answer = st.chat_input("Your answer (Y/N):")
+            user_answer = st.chat_input("Your answer (Y/N):")
+            
+            if user_answer:
+                if user_answer.upper() not in ['Y', 'N', 'YES', 'NO']:
+                    st.error("Please answer with Y or N")
+                    return
 
-        if user_answer:
-            if user_answer.upper() not in ['Y', 'N', 'YES', 'NO']:
-                st.error("Please answer with Y or N")
-                return
+                with st.chat_message("user"):
+                    st.markdown(user_answer)
+                    st.session_state.messages.append({"role": "user", "content": user_answer})
 
-            with st.chat_message("user"):
-                st.markdown(user_answer)
-                st.session_state.messages.append({"role": "user", "content": user_answer})
-
-            st.session_state.chat.process_answer(user_answer)
+                st.session_state.chat.process_answer(user_answer)
+                st.rerun()
+        else:
+            st.session_state.chat.state = "report"
             st.rerun()
-
-    elif not st.session_state.report_generated:
+            
+    elif st.session_state.chat.state == "report" and not st.session_state.report_generated:
         report = st.session_state.chat.generate_report()
         
         with st.chat_message("assistant"):
-            st.markdown("# Comprehensive Security Risk Assessment Report")
+            st.markdown("# Security Risk Report")
 
             if not report['identified_risks']:
                 st.success("No security risks were identified based on your responses.")
             else:
                 for risk_data in report['identified_risks']:
+
                     risk_type = risk_data['risk_type']
                     full_data = risk_data['mitigations']
                     mitigations = full_data['mitigations']
@@ -363,7 +596,8 @@ def main():
                                         st.markdown("#### Audio/Visual Features")
                                         for feature in details['audio_visual']:
                                             st.markdown(f"- {feature}")
-
+            pdf_link = st.session_state.chat.generate_pdf_report()
+            st.markdown(pdf_link, unsafe_allow_html=True)
         st.session_state.report_generated = True
 
 if __name__ == "__main__":

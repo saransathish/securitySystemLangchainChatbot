@@ -268,6 +268,9 @@ class RiskAssessmentChat:
             pdf_generator.add_quick_report(report, self.store_info.store_data, self.answers)
         
         return pdf_generator.get_download_link(report_type)
+    
+    def collect_store_info(self, field, value):
+        self.store_data[field] = value
 
 class StoreInformation:
     def __init__(self):
@@ -332,9 +335,12 @@ class PDFReport:
     def add_survey_responses(self, answers):
         self.add_section("Survey Responses")
         for question, answer in answers.items():
-            self.pdf.multi_cell(0, 10, txt=f"Question: {question}")
-            self.pdf.multi_cell(0, 10, txt=f"Answer: {answer}")
-            self.pdf.ln(5)
+            # Split long questions into multiple lines
+            lines = [question[i:i+90] for i in range(0, len(question), 90)]
+            for line in lines:
+                self.pdf.cell(0, 10, txt=line, ln=True)
+            self.pdf.cell(0, 10, txt=f"Answer: {answer}", ln=True)
+            self.pdf.cell(0, 10, txt="", ln=True)
     
     def add_quick_report(self, report, store_data, answers):
         self.add_store_info(store_data)
@@ -368,6 +374,30 @@ class PDFReport:
                     self.pdf.multi_cell(0, 10, txt=f"{category.title()} Solutions:")
                     solutions_text = ", ".join(items)
                     self.pdf.multi_cell(0, 10, txt=solutions_text)
+                    
+    def generate_pdf_report(self, report_type="detailed"):
+        if report_type == "detailed":
+            report = self.generate_detailed_report()
+        else:
+            report = self.generate_quick_report()
+            
+        pdf_generator = PDFReport()
+        pdf_generator.add_title("Security Risk Assessment Report")
+        pdf_generator.add_content(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Add store information
+        pdf_generator.add_store_info(self.store_data)
+        
+        # Add survey responses
+        pdf_generator.add_survey_responses(self.answers)
+        
+        # Add report content
+        if report_type == "detailed":
+            pdf_generator.add_detailed_report(report)
+        else:
+            pdf_generator.add_quick_report(report)
+        
+        return pdf_generator.get_download_link(report_type)
 
 def main():
     st.set_page_config(page_title="Security Risk Assessment", layout="wide")
@@ -382,33 +412,38 @@ def main():
     
     if 'report_generated' not in st.session_state:
         st.session_state.report_generated = False
-
+    
+    store_fields = [
+        {"field": "Store Name", "type": "text"},
+        {"field": "Store Identifier", "type": "text"},
+        {"field": "Address", "type": "text"},
+        {"field": "Postcode", "type": "text"},
+        {"field": "Store Format", "type": "select", "options": ["Superstore", "Convenience store", "Department store"]},
+        {"field": "Location Type", "type": "select", "options": ["Retail park", "Shopping centre", "High street"]},
+        {"field": "Number of Entrances", "type": "select", "options": ["1", "2", "3", "4", "5+"]}
+    ]
     # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
     if st.session_state.chat.state == "store_info":
-        field_info = st.session_state.chat.store_info.get_next_question()
+        current_field = next((field for field in store_fields if field["field"] not in st.session_state.chat.store_data), None)
         
-        if field_info:
+        if current_field:
             with st.chat_message("assistant"):
-                message = field_info['question']
-                st.markdown(message)
-                st.session_state.messages.append({"role": "assistant", "content": message})
-
-            user_answer = st.chat_input("Your answer:")
-            
-            if user_answer:
-                with st.chat_message("user"):
-                    st.markdown(user_answer)
-                    st.session_state.messages.append({"role": "user", "content": user_answer})
+                st.markdown(f"Please provide the {current_field['field']}:")
+                if current_field["type"] == "select":
+                    value = st.selectbox("Select an option:", current_field["options"])
+                else:
+                    value = st.text_input("Enter value:")
                 
-                st.session_state.chat.store_info.process_answer(user_answer)
-                
-                if st.session_state.chat.store_info.is_complete():
-                    st.session_state.chat.state = "survey"
-                st.rerun()
+                if st.button("Submit"):
+                    st.session_state.chat.collect_store_info(current_field["field"], value)
+                    st.rerun()
+        else:
+            st.session_state.chat.state = "survey"
+            st.rerun()
                 
     if st.session_state.chat.state == "survey":
         question = st.session_state.chat.get_next_question()
