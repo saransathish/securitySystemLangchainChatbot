@@ -431,7 +431,7 @@ class PDFReport:
 # Main Application
 def main():
     st.set_page_config(page_title="Security Risk Assessment", layout="wide")
-    st.title("Security Risk Assessment System")
+    st.title("Security Risk Survey")
     
     if 'chat' not in st.session_state:
         st.session_state.chat = RiskAssessmentChat()
